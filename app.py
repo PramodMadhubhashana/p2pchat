@@ -2,7 +2,7 @@ import os
 import hashlib
 import base64
 from flask import Flask, render_template, request, jsonify
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit
 from cryptography.hazmat.primitives import padding as sym_padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 import bleach
@@ -39,7 +39,9 @@ def compute_hash(message):
     return sha256.hexdigest()
 
 def validate_input(message):
+    # Strip tags to prevent XSS
     cleaned_message = bleach.clean(message, strip=True)
+    # Enforce length constraints
     if len(cleaned_message) > 500:
         raise ValueError("Input too long")
     return cleaned_message
@@ -59,7 +61,10 @@ def decrypt_message_endpoint():
         encrypted_message = data['message']
         received_hash = data['hash']
 
+        # Decrypt Message
         decrypted_message = decrypt_message(encrypted_message)
+
+        # Verify Hash
         computed_hash = compute_hash(decrypted_message)
         if received_hash != computed_hash:
             raise ValueError("Message integrity compromised")
@@ -68,33 +73,25 @@ def decrypt_message_endpoint():
     except Exception as e:
         return jsonify({'error': str(e)})
 
-@socketio.on('join')
-def handle_join(data):
-    room = data['room']
-    join_room(room)
-    emit('status', {'msg': f'{data["username"]} has joined the room.'}, room=room)
-
-@socketio.on('leave')
-def handle_leave(data):
-    room = data['room']
-    leave_room(room)
-    emit('status', {'msg': f'{data["username"]} has left the room.'}, room=room)
-
 @socketio.on('send_message')
 def handle_send_message(data):
     try:
-        room = data['room']
+        # Input Validation
         username = validate_input(data['username'])
         message = validate_input(data['message'])
 
+        # Encrypt Message
         encrypted_message = encrypt_message(message)
+
+        # Compute Hash
         message_hash = compute_hash(message)
 
+        # Emit message to all clients
         emit('display_message', {
             'username': username,
             'message': encrypted_message,
             'hash': message_hash
-        }, room=room)
+        }, broadcast=True)
     except Exception as e:
         emit('error', {'error': str(e)})
 
